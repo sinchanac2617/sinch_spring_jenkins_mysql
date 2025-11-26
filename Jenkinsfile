@@ -1,37 +1,66 @@
 pipeline {
     agent any
-    tools {
-        maven 'maven'
+
+    environment {
+        APP_PORT = "8088"
+        LOG_FILE = "app.log"
     }
+
     stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+            post {
+                success { echo "Checkout completed successfully" }
+                failure { echo "Checkout FAILED" }
+            }
+        }
+
         stage('Build') {
             steps {
-                sh 'mvn clean package -DskipTests'
+                sh "./mvnw clean package -DskipTests"
+            }
+            post {
+                success { echo "Build successful" }
+                failure { echo "Build FAILED" }
             }
         }
+
+        stage('Stop Existing Process') {
+            steps {
+                script {
+                    def pid = sh(script: "lsof -t -i:${APP_PORT} || true", returnStdout: true).trim()
+
+                    if (pid) {
+                        echo "Killing PID ${pid}"
+                        sh "kill -9 ${pid}"
+                    } else {
+                        echo "No app running on port ${APP_PORT}"
+                    }
+                }
+            }
+            post {
+                success { echo "Stop Existing Process completed" }
+                failure { echo "Stop Existing Process FAILED" }
+            }
+        }
+
         stage('Deploy') {
             steps {
-                sh '''
-                    echo "Stopping existing Spring Boot application if running..."
-                    if pgrep -f spring_app_sak-0.0.1-SNAPSHOT.jar > /dev/null; then
-                        sudo pkill -f spring_app_sak-0.0.1-SNAPSHOT.jar
-                        echo "Application stopped."
-                    else
-                        echo "No existing application running."
-                    fi
-
-                    echo "Starting the Spring Boot application..."
-                    sudo java -jar target/spring_app_sak-0.0.1-SNAPSHOT.jar > /dev/null 2>&1 &
-                '''
+                sh """
+                    nohup java -jar target/*.jar --server.port=${APP_PORT} > ${LOG_FILE} 2>&1 &
+                """
+            }
+            post {
+                success { echo "Application deployed successfully" }
+                failure { echo "Deployment FAILED" }
             }
         }
     }
+
     post {
-        success {
-            echo "Deployed successfully"
-        }
-        failure {
-            echo "Failed to Deploy"
-        }
+        always { echo "Pipeline Finished" }
     }
 }
